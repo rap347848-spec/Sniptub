@@ -33,6 +33,7 @@ object Jobs {
     val list = mutableStateListOf<Dl>()
     var ready by mutableStateOf(false)
     var initError by mutableStateOf<String?>(null)
+    var status by mutableStateOf("")
     fun add(ctx: Context, url: String, title: String, thumb: String, height: Int) {
         val j = Dl((System.currentTimeMillis() % 1000000000).toInt(), url, title, thumb, height)
         list.add(0, j)
@@ -53,18 +54,41 @@ class App : Application() {
             try {
                 YoutubeDL.getInstance().init(this@App)
                 FFmpeg.getInstance().init(this@App)
+                val p = this@App.getSharedPreferences("s", Context.MODE_PRIVATE)
+                if (System.currentTimeMillis() - p.getLong("upd", 0L) > 86400000L) {
+                    Jobs.status = "جاري تحديث محرك التحميل…"
+                    val t = Thread {
+                        val r = updateEngine(this@App)
+                        if (r.startsWith("تم")) p.edit().putLong("upd", System.currentTimeMillis()).apply()
+                        Jobs.status = r
+                    }
+                    t.start(); t.join(25000)
+                }
                 Jobs.ready = true
             } catch (e: Exception) { Jobs.initError = e.message }
         }.start()
     }
 }
 
+fun exec(r: YoutubeDLRequest, ms: Long = 90000L): String {
+    var w = 0
+    while (!Jobs.ready && w++ < 300) Thread.sleep(200)
+    val tag = "q" + System.nanoTime()
+    r.addOption("--socket-timeout", "20")
+    val t = Thread { try { Thread.sleep(ms); YoutubeDL.getInstance().destroyProcessById(tag) } catch (e: InterruptedException) {} }
+    t.start()
+    try { return YoutubeDL.getInstance().execute(r, tag) { _, _, _ -> }.out } finally { t.interrupt() }
+}
+
+fun errText(e: Exception): String =
+    (e.message ?: "").lines().filter { it.isNotBlank() }.takeLast(3).joinToString("\n").take(300).ifBlank { "خطأ غير معروف" }
+
 fun dur(s: Int) = if (s <= 0) "" else "%d:%02d".format(s / 60, s % 60)
 
 fun fetchInfo(u: String): Pair<Item, List<Int>> {
     val r = YoutubeDLRequest(u)
     r.addOption("--dump-single-json"); r.addOption("--no-playlist")
-    val o = JSONObject(YoutubeDL.getInstance().execute(r).out)
+    val o = JSONObject(exec(r))
     val fs = o.optJSONArray("formats")
     var mx = 0
     if (fs != null) for (i in 0 until fs.length()) mx = maxOf(mx, fs.getJSONObject(i).optInt("height", 0))
@@ -75,7 +99,7 @@ fun fetchInfo(u: String): Pair<Item, List<Int>> {
 fun search(q: String): List<Item> {
     val r = YoutubeDLRequest("ytsearch15:$q")
     r.addOption("--flat-playlist"); r.addOption("--dump-json")
-    return YoutubeDL.getInstance().execute(r).out.lines().filter { it.startsWith("{") }.map {
+    return exec(r).lines().filter { it.startsWith("{") }.map {
         val o = JSONObject(it); val id = o.optString("id")
         Item("https://www.youtube.com/watch?v=$id", o.optString("title"), "https://i.ytimg.com/vi/$id/mqdefault.jpg", dur(o.optInt("duration")))
     }
@@ -136,7 +160,7 @@ class DlService : Service() {
         val dir = tmp(j); dir.mkdirs()
         try {
             var w = 0
-            while (!Jobs.ready && w++ < 150) Thread.sleep(200)
+            while (!Jobs.ready && w++ < 300) Thread.sleep(200)
             if (!Jobs.ready) throw Exception("المحرك غير جاهز: ${Jobs.initError}")
             val r = YoutubeDLRequest(j.url)
             r.addOption("--no-playlist"); r.addOption("--no-mtime")
@@ -156,7 +180,7 @@ class DlService : Service() {
             j.percent = 100; j.state = St.DONE
             dir.deleteRecursively()
         } catch (e: Exception) {
-            if (j.state == St.RUNNING) { j.state = St.FAILED; j.err = e.message?.take(200) ?: "" }
+            if (j.state == St.RUNNING) { j.state = St.FAILED; j.err = errText(e) }
         } finally {
             notify(j); stopIfIdle()
         }

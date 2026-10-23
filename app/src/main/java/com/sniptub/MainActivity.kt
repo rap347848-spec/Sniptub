@@ -78,7 +78,7 @@ fun startJob(ctx: Context, m: Item, h: Int) {
         Column(Modifier.padding(p).fillMaxSize()) {
             if (!Jobs.ready) {
                 LinearProgressIndicator(Modifier.fillMaxWidth())
-                Text(Jobs.initError?.let { "خطأ تهيئة: $it" } ?: "جاري تجهيز المحرك (أول تشغيل فقط)…", Modifier.padding(8.dp), fontSize = 12.sp)
+                Text(Jobs.initError?.let { "خطأ تهيئة: $it" } ?: Jobs.status.ifBlank { "جاري تجهيز المحرك (أول تشغيل فقط)…" }, Modifier.padding(8.dp), fontSize = 12.sp)
             }
             when (nav) { 0 -> Home(a); 1 -> Queue(); else -> SettingsScreen(a) }
         }
@@ -108,7 +108,7 @@ fun startJob(ctx: Context, m: Item, h: Int) {
         text = u; busy = true; msg = ""; info = null
         scope.launch {
             try { val r = withContext(Dispatchers.IO) { fetchInfo(u) }; info = r.first; heights = r.second }
-            catch (e: Exception) { msg = "تعذر قراءة الرابط" }
+            catch (e: Exception) { msg = errText(e) }
             busy = false
         }
     }
@@ -143,13 +143,15 @@ fun startJob(ctx: Context, m: Item, h: Int) {
     var q by remember { mutableStateOf(if (music) preset else "") }
     var list by remember { mutableStateOf(listOf<Item>()) }
     var busy by remember { mutableStateOf(false) }
+    var err by remember { mutableStateOf("") }
     var pick by remember { mutableStateOf<Item?>(null) }
     val scope = rememberCoroutineScope()
     val ctx = LocalContext.current
     fun go() {
-        busy = true
+        busy = true; err = ""
         scope.launch {
-            list = try { withContext(Dispatchers.IO) { search(q.ifBlank { preset }) } } catch (e: Exception) { emptyList() }
+            try { list = withContext(Dispatchers.IO) { search(q.ifBlank { preset }) } }
+            catch (e: Exception) { err = errText(e); list = emptyList() }
             busy = false
         }
     }
@@ -158,6 +160,7 @@ fun startJob(ctx: Context, m: Item, h: Int) {
         if (!music) OutlinedTextField(q, { q = it }, Modifier.fillMaxWidth().padding(12.dp), placeholder = { Text("ابحث في يوتيوب") }, singleLine = true,
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search), keyboardActions = KeyboardActions(onSearch = { go() }))
         if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+        if (err.isNotEmpty()) Text(err, color = Color.Red, fontSize = 12.sp, modifier = Modifier.padding(8.dp))
         LazyColumn {
             items(list) { m ->
                 Row(Modifier.fillMaxWidth().clickable { if (music) startJob(ctx, m, 0) else pick = m }.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -214,6 +217,7 @@ fun startJob(ctx: Context, m: Item, h: Int) {
         Text("الإعدادات", fontSize = 22.sp, fontWeight = FontWeight.Bold)
         Button({ upd = "جاري التحديث…"; scope.launch { upd = withContext(Dispatchers.IO) { updateEngine(ctx) } } }, Modifier.fillMaxWidth()) { Text("تحديث محرك التحميل") }
         if (upd.isNotEmpty()) Text(upd, fontSize = 12.sp)
+        if (Jobs.status.isNotEmpty()) Text("حالة المحرك: ${Jobs.status}", fontSize = 12.sp)
         Button({ if (Jobs.active()) ask = true else a.finishAffinity() }, Modifier.fillMaxWidth()) { Text("خروج من التطبيق") }
         Spacer(Modifier.weight(1f))
         Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
