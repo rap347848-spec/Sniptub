@@ -14,6 +14,9 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -213,13 +216,16 @@ fun startJob(ctx: Context, m: Item, h: Int) {
     val scope = rememberCoroutineScope()
     var ask by remember { mutableStateOf(false) }
     var upd by remember { mutableStateOf("") }
-    Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    var diag by remember { mutableStateOf("") }
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("الإعدادات", fontSize = 22.sp, fontWeight = FontWeight.Bold)
         Button({ upd = "جاري التحديث…"; scope.launch { upd = withContext(Dispatchers.IO) { updateEngine(ctx) } } }, Modifier.fillMaxWidth()) { Text("تحديث محرك التحميل") }
         if (upd.isNotEmpty()) Text(upd, fontSize = 12.sp)
         if (Jobs.status.isNotEmpty()) Text("حالة المحرك: ${Jobs.status}", fontSize = 12.sp)
+        Button({ diag = "جاري الفحص… (قد ياخذ دقيقة)"; scope.launch { diag = withContext(Dispatchers.IO) { diagnose() } } }, Modifier.fillMaxWidth()) { Text("فحص المحرك") }
+        if (diag.isNotEmpty()) SelectionContainer { Text(diag, fontSize = 11.sp) }
         Button({ if (Jobs.active()) ask = true else a.finishAffinity() }, Modifier.fillMaxWidth()) { Text("خروج من التطبيق") }
-        Spacer(Modifier.weight(1f))
+        Spacer(Modifier.height(24.dp))
         Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
             Text("تصميم طلال قاسم", fontWeight = FontWeight.Bold)
             Text("0599347848", color = MaterialTheme.colorScheme.primary,

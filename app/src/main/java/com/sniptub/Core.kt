@@ -13,8 +13,11 @@ import androidx.core.app.NotificationCompat
 import com.yausername.ffmpeg.FFmpeg
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLRequest
+import com.yausername.youtubedl_android.YoutubeDLResponse
 import org.json.JSONObject
 import java.io.File
+import java.net.HttpURLConnection
+import java.net.URL
 import java.util.concurrent.Executors
 
 enum class St { QUEUED, RUNNING, PAUSED, DONE, FAILED, CANCELED }
@@ -70,14 +73,41 @@ class App : Application() {
     }
 }
 
-fun exec(r: YoutubeDLRequest, ms: Long = 90000L): String {
+fun base(r: YoutubeDLRequest) {
+    r.addOption("--socket-timeout", "20"); r.addOption("--force-ipv4"); r.addOption("--no-cache-dir")
+}
+
+fun execR(r: YoutubeDLRequest, ms: Long = 90000L): YoutubeDLResponse {
     var w = 0
     while (!Jobs.ready && w++ < 300) Thread.sleep(200)
     val tag = "q" + System.nanoTime()
-    r.addOption("--socket-timeout", "20")
+    base(r)
     val t = Thread { try { Thread.sleep(ms); YoutubeDL.getInstance().destroyProcessById(tag) } catch (e: InterruptedException) {} }
     t.start()
-    try { return YoutubeDL.getInstance().execute(r, tag) { _, _, _ -> }.out } finally { t.interrupt() }
+    try { return YoutubeDL.getInstance().execute(r, tag) { _, _, _ -> } } finally { t.interrupt() }
+}
+
+fun exec(r: YoutubeDLRequest): String = execR(r).out
+
+fun diagnose(): String {
+    val sb = StringBuilder()
+    val test = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+    sb.append("ready=${Jobs.ready} init=${Jobs.initError} status=${Jobs.status}\n")
+    try {
+        val c = URL("https://www.youtube.com").openConnection() as HttpURLConnection
+        c.connectTimeout = 8000; c.readTimeout = 8000
+        sb.append("net: HTTP ${c.responseCode}\n")
+    } catch (e: Exception) { sb.append("net ERR: ${e.javaClass.simpleName} ${e.message}\n") }
+    try {
+        val r = YoutubeDLRequest(test); r.addOption("--version")
+        sb.append("yt-dlp version: ${execR(r).out.trim()}\n")
+    } catch (e: Exception) { sb.append("version ERR: ${(e.message ?: "").takeLast(600)}\n") }
+    try {
+        val r = YoutubeDLRequest(test)
+        r.addOption("-v"); r.addOption("--simulate"); r.addOption("--no-playlist")
+        sb.append("--- test:\n").append(execR(r).err.takeLast(1200))
+    } catch (e: Exception) { sb.append("--- test ERR:\n").append((e.message ?: "").takeLast(1200)) }
+    return sb.toString()
 }
 
 fun errText(e: Exception): String =
@@ -163,7 +193,7 @@ class DlService : Service() {
             while (!Jobs.ready && w++ < 300) Thread.sleep(200)
             if (!Jobs.ready) throw Exception("المحرك غير جاهز: ${Jobs.initError}")
             val r = YoutubeDLRequest(j.url)
-            r.addOption("--no-playlist"); r.addOption("--no-mtime")
+            base(r); r.addOption("--no-playlist"); r.addOption("--no-mtime")
             r.addOption("-o", "${dir.absolutePath}/f.%(ext)s")
             if (j.height == 0) { r.addOption("-x"); r.addOption("--audio-format", "mp3") }
             else {
